@@ -7,24 +7,57 @@ const input = $('#input');
 const form = $('#composer');
 const sendBtn = $('#send');
 const stopBtn = $('#stop');
+const statusDot = $('#status-dot');
+const statusText = $('#subtitle');
 
-let sessionId = localStorage.getItem('talkinter.session') || crypto.randomUUID();
+// crypto.randomUUID / navigator.clipboard only exist in secure contexts
+// (https or localhost). This app is often served over plain http://LAN-IP,
+// so both need fallbacks.
+function uuid() {
+  if (window.crypto?.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+function copyText(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } finally { ta.remove(); }
+  return Promise.resolve();
+}
+
+let sessionId = localStorage.getItem('talkinter.session') || uuid();
 localStorage.setItem('talkinter.session', sessionId);
 let authToken = localStorage.getItem('talkinter.token') || '';
 let inflight = null; // AbortController for the active request
+let subtitleDefault = '';
 
-// ---- bootstrap branding / auth ----
+// ---- bootstrap branding / auth / connectivity ----
 async function init() {
   try {
     const cfg = await fetch('/api/config').then((r) => r.json());
     document.title = cfg.title || 'Talkinter';
     $('#title').textContent = cfg.title || 'Talkinter';
-    $('#subtitle').textContent = cfg.subtitle || '';
-    $('#adapter-tag').textContent = cfg.adapter || '';
+    subtitleDefault = `${cfg.subtitle || ''} · ${cfg.adapter}`;
+    statusText.textContent = subtitleDefault;
+    setStatus('ok');
     if (cfg.authRequired && !authToken) promptForToken();
   } catch {
-    /* offline / config error — UI still works */
+    setStatus('error');
+    statusText.textContent = '無法連線到伺服器';
   }
+}
+
+function setStatus(state) {
+  // state: 'ok' (green) | 'busy' (amber pulse) | 'error' (red)
+  statusDot.className = `dot ${state}`;
 }
 
 function promptForToken() {
@@ -48,7 +81,7 @@ function addMessage(role, text) {
   if (role === 'user') {
     bubble.textContent = text;
   } else {
-    bubble.innerHTML = text ? renderMarkdown(text) : typingIndicator();
+    bubble.innerHTML = text ? renderMarkdown(text) : thinkingIndicator();
   }
   msg.append(avatar, bubble);
   messagesEl.appendChild(msg);
@@ -56,8 +89,21 @@ function addMessage(role, text) {
   return bubble;
 }
 
-function typingIndicator() {
-  return '<span class="typing"><span></span><span></span><span></span></span>';
+function thinkingIndicator() {
+  return (
+    '<span class="thinking"><span class="typing"><span></span><span></span><span></span></span>' +
+    '<span class="thinking-label">思考中…</span></span>'
+  );
+}
+
+function showError(bubble, accText, errText) {
+  const base = accText.trim() ? renderMarkdown(accText) : '';
+  bubble.innerHTML =
+    base + `<div class="error-box">⚠️ ${escapeHtml(errText)}</div>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function scrollToBottom() {
@@ -70,7 +116,7 @@ function wireCopyButtons(scope) {
     btn.dataset.wired = '1';
     btn.addEventListener('click', () => {
       const code = btn.parentElement.querySelector('code')?.innerText || '';
-      navigator.clipboard.writeText(code).then(() => {
+      copyText(code).then(() => {
         btn.textContent = 'copied';
         setTimeout(() => (btn.textContent = 'copy'), 1200);
       });
@@ -82,11 +128,13 @@ function wireCopyButtons(scope) {
 async function send(text) {
   addMessage('user', text);
   const bubble = addMessage('bot', '');
-  bubble.classList.add('caret');
 
   setSending(true);
+  setStatus('busy');
+  statusText.textContent = '等待回應…';
   inflight = new AbortController();
   let acc = '';
+  let failed = false;
 
   try {
     const res = await fetch('/api/chat', {
@@ -100,19 +148,20 @@ async function send(text) {
     });
 
     if (res.status === 401) {
-      bubble.classList.remove('caret');
-      bubble.innerHTML = '<em>未授權。請重新整理並輸入正確的存取密碼。</em>';
+      failed = true;
+      showError(bubble, '', '密碼錯誤或未授權。請重新整理頁面並輸入正確的存取密碼。');
       localStorage.removeItem('talkinter.token');
       authToken = '';
       return;
     }
     if (!res.ok || !res.body) {
-      throw new Error(`HTTP ${res.status}`);
+      throw new Error(`伺服器回應 HTTP ${res.status}`);
     }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    let gotFirst = false;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -125,36 +174,45 @@ async function send(text) {
         let evt;
         try { evt = JSON.parse(line); } catch { continue; }
         if (evt.type === 'chunk') {
+          if (!gotFirst) {
+            gotFirst = true;
+            statusText.textContent = '回應中…';
+          }
           acc += evt.text;
           bubble.innerHTML = renderMarkdown(acc);
           wireCopyButtons(bubble);
           scrollToBottom();
         } else if (evt.type === 'error') {
-          acc += `\n\n> ⚠️ ${evt.error}`;
-          bubble.innerHTML = renderMarkdown(acc);
+          failed = true;
+          showError(bubble, acc, evt.error);
         }
       }
     }
   } catch (err) {
     if (err.name === 'AbortError') {
-      acc += acc ? '\n\n> _(已停止)_' : '_(已停止)_';
+      acc += acc ? '\n\n_(已停止)_' : '_(已停止)_';
+      bubble.innerHTML = renderMarkdown(acc);
     } else {
-      acc += `\n\n> ⚠️ ${err.message}`;
+      failed = true;
+      showError(bubble, acc, `連線失敗：${err.message}`);
     }
-    bubble.innerHTML = renderMarkdown(acc);
   } finally {
-    bubble.classList.remove('caret');
-    if (!acc.trim()) bubble.innerHTML = '<em>（沒有回應）</em>';
+    if (!failed && !acc.trim() && !bubble.querySelector('.error-box')) {
+      showError(bubble, '', 'Agent 沒有任何回應。請檢查伺服器 log（AGENT_CMD 路徑是否正確？）');
+      failed = true;
+    }
     setSending(false);
+    setStatus(failed ? 'error' : 'ok');
+    statusText.textContent = subtitleDefault || '';
     inflight = null;
     scrollToBottom();
+    input.focus();
   }
 }
 
 function setSending(on) {
   sendBtn.disabled = on;
   stopBtn.hidden = !on;
-  input.disabled = false;
 }
 
 // ---- events ----
@@ -184,6 +242,7 @@ function autoresize() {
 }
 
 $('#new-chat').addEventListener('click', async () => {
+  if (!window.confirm('開始新對話？目前的對話紀錄會被清除。')) return;
   if (inflight) inflight.abort();
   try {
     await fetch('/api/reset', {
@@ -195,14 +254,21 @@ $('#new-chat').addEventListener('click', async () => {
       body: JSON.stringify({ sessionId }),
     });
   } catch { /* ignore */ }
-  sessionId = crypto.randomUUID();
+  sessionId = uuid();
   localStorage.setItem('talkinter.session', sessionId);
   messagesEl.innerHTML = '';
   const empty = document.createElement('div');
   empty.className = 'empty';
+  empty.id = 'empty-state';
   empty.innerHTML = '<div class="empty-emoji">💬</div><p>開始和你的 agent 聊天吧</p>';
   messagesEl.appendChild(empty);
   input.focus();
+});
+
+// Surface any unexpected JS error instead of dying silently.
+window.addEventListener('error', (e) => {
+  setStatus('error');
+  if (statusText) statusText.textContent = `前端錯誤：${e.message}`;
 });
 
 init();
