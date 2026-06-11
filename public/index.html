@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>Talkinter</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <div class="brand-text">
+          <strong id="title">Talkinter</strong>
+          <small id="subtitle">Hermes agent</small>
+        </div>
+      </div>
+      <div class="actions">
+        <span id="adapter-tag" class="tag" title="Active adapter"></span>
+        <button id="new-chat" class="icon-btn" title="New chat">＋</button>
+      </div>
+    </header>
+
+    <main id="messages" class="messages">
+      <div class="empty" id="empty-state">
+        <div class="empty-emoji">💬</div>
+        <p>開始和你的 agent 聊天吧</p>
+      </div>
+    </main>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <textarea id="input" rows="1" placeholder="輸入訊息…  (Enter 送出，Shift+Enter 換行)"></textarea>
+      <button id="send" type="submit" class="send-btn" title="Send" aria-label="Send">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 11.5 21 3l-8.5 18-2.2-7.3z"/></svg>
+      </button>
+      <button id="stop" type="button" class="stop-btn" title="Stop" hidden>停止</button>
+    </form>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
