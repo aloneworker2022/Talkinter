@@ -159,6 +159,32 @@ cp .env.example .env
 set -a && . ./.env && set +a && node server.js
 ```
 
+## Run in the background (recommended)
+
+Instead of keeping two terminals open, install both Talkinter and the Hermes
+gateway as user-level systemd services — they run in the background, restart
+on failure, and start at boot:
+
+```bash
+cd ~/Talkinter
+cp .env.example .env   # then edit .env with your AGENT_HTTP_* settings
+bash deploy/install.sh
+```
+
+Useful commands afterwards:
+
+```bash
+systemctl --user status talkinter hermes-gateway   # status of both
+journalctl --user -u talkinter -f                  # live Talkinter logs
+journalctl --user -u hermes-gateway -f             # live gateway logs
+systemctl --user restart talkinter                 # after editing .env
+```
+
+The installer also runs `loginctl enable-linger` so the services start at
+boot without anyone logging in (it tells you the sudo command if it lacks
+permission). Services run as your own user — do not install them as root;
+a root gateway reads root's `~/.hermes` config, not yours.
+
 ## Exposing it safely
 
 The server binds to `0.0.0.0`, so on a remote box it's reachable on your LAN /

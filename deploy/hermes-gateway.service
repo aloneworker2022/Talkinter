@@ -1,0 +1,14 @@
+[Unit]
+Description=Hermes Agent gateway (messaging platforms + API server)
+After=network.target
+
+[Service]
+# `hermes gateway run` keeps the gateway in the foreground, which is what
+# systemd wants. --replace takes over from a stale instance after a crash.
+# bash -l so hermes is found via the user's normal PATH (~/.local/bin etc.).
+ExecStart=/bin/bash -lc 'exec hermes gateway run --replace'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

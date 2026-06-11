@@ -1,0 +1,16 @@
+[Unit]
+Description=Talkinter web chat for Hermes
+After=network.target hermes-gateway.service
+Wants=hermes-gateway.service
+
+[Service]
+WorkingDirectory=@REPO_DIR@
+# All settings come from the repo's .env file (copy .env.example).
+EnvironmentFile=-@REPO_DIR@/.env
+# bash -l so node is found via the user's normal PATH (nvm etc.).
+ExecStart=/bin/bash -lc 'exec node server.js'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
