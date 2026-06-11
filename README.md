@@ -46,6 +46,8 @@ stays readable:
 - **ANSI colour codes** are stripped.
 - The **prompt** it reprints (`>`, `hermes>`, `❯`, ...) is removed.
 - The **echo** of your own input line is removed.
+- **TUI decorations** are removed: separator lines (`────`, `====`) and
+  box-drawing borders (`╭──╮`, `│ text │`, `╰──╯`).
 
 Because a REPL never says "I'm done", a reply is treated as complete after
 `AGENT_CMD_IDLE_MS` (default 900ms) of silence — but only *after* the first real
