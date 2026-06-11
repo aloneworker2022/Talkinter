@@ -28,16 +28,53 @@ it at your real agent.
 
 ## Connect to Hermes
 
-Talkinter doesn't assume how Hermes is invoked — pick the adapter that matches.
+> **First, make sure plain `hermes` already works for you in the terminal.**
+> On first run Hermes asks you to pick an LLM provider (Nous Portal, OpenRouter,
+> OpenAI, ...) and enter that provider's API key. If that setup isn't done,
+> Hermes won't answer anything — and neither will Talkinter. This is the
+> "registration" step; it belongs to Hermes, not to Talkinter.
 
-### Your setup: you just type `hermes` and it enters chat mode
+### Recommended: Hermes gateway (OpenAI-compatible API) ← use this
 
-That's an interactive REPL, so use the **command** adapter in **persistent**
-mode (one Hermes process stays alive per browser session and each message is
-fed to its stdin — exactly what you do over SSH, minus the SSH):
+`hermes` on its own is a full-screen **TUI**, which can't be driven cleanly
+through pipes. Instead use Hermes's built-in API server, which is exactly what
+Talkinter's `http` adapter is for:
+
+1. In your Hermes config, set an API key for the server, e.g. `API_SERVER_KEY=my-secret`.
+2. Start the gateway (it serves an OpenAI-compatible API on `127.0.0.1:8642`):
+   ```bash
+   hermes gateway
+   # verify:  curl http://localhost:8642/health
+   ```
+3. Point Talkinter at it:
+   ```bash
+   AGENT_ADAPTER=http \
+   AGENT_HTTP_URL=http://localhost:8642/v1/chat/completions \
+   AGENT_HTTP_KEY=my-secret \
+   node server.js
+   ```
+
+The `/v1/chat/completions` path matters — `/v1` alone won't work. Talkinter
+streams the reply and keeps the conversation going. (If the gateway runs on
+another machine, replace `localhost` with its address.)
+
+### Alternative: one-shot CLI query
+
+Hermes can answer a single prompt without the TUI via `hermes chat -q`. This
+uses the **command** adapter and relies on Hermes's own persistent memory to
+carry context between messages:
 
 ```bash
-AGENT_ADAPTER=command AGENT_CMD="hermes" AGENT_CMD_MODE=persistent node server.js
+AGENT_ADAPTER=command AGENT_CMD="hermes chat -q {message}" node server.js
+```
+
+### Wrapping a plain line-based REPL (not Hermes' TUI)
+
+For a simple REPL agent that reads a line of stdin and prints a reply (no
+full-screen TUI), persistent mode keeps one process alive per browser session:
+
+```bash
+AGENT_ADAPTER=command AGENT_CMD="your-agent" AGENT_CMD_MODE=persistent node server.js
 ```
 
 Talkinter automatically cleans up what an interactive CLI prints so the web UI
