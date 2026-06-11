@@ -231,8 +231,19 @@ async function send(text) {
       acc += acc ? '\n\n_(已停止)_' : '_(已停止)_';
       stageReply.innerHTML = renderMarkdown(acc);
     } else {
-      failed = true;
-      showError(acc, `連線失敗：${err.message}`);
+      // The stream broke (phone switched apps?) but the server keeps
+      // generating — try to pick the reply back up instead of erroring.
+      const rec = await recoverTurn();
+      if (rec.recovered) {
+        acc = rec.text || '';
+        if (rec.errText) {
+          failed = true;
+          showError(acc, rec.errText);
+        }
+      } else {
+        failed = true;
+        showError(acc, `連線失敗：${err.message}`);
+      }
     }
   } finally {
     stageReply.classList.remove('caret');
@@ -257,6 +268,93 @@ function setSending(on) {
   stopBtn.hidden = !on;
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function authHeaders() {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
+// ---- recovery: pick a turn back up after the phone broke the stream ----
+let recovering = false;
+
+// Polls /api/turn until the turn finishes, updating the stage live.
+// Returns { recovered, text, failed, errText }.
+async function recoverTurn() {
+  recovering = true;
+  statusText.textContent = '連線中斷，恢復中…';
+  try {
+    for (let i = 0; i < 600; i++) {
+      let info;
+      try {
+        const r = await fetch(`/api/turn?sessionId=${encodeURIComponent(sessionId)}`, {
+          headers: authHeaders(),
+        });
+        if (!r.ok) return { recovered: false };
+        info = await r.json();
+      } catch {
+        await sleep(1500); // still offline (app in background) — keep trying
+        continue;
+      }
+      if (info.state === 'idle') return { recovered: false };
+      if (typeof info.text === 'string') {
+        stageReply.innerHTML = renderMarkdown(info.text || '');
+        wireCopyButtons(stageReply);
+        stageReply.scrollTop = stageReply.scrollHeight;
+      }
+      if (info.state === 'done') {
+        return { recovered: true, text: info.text || '', failed: false };
+      }
+      if (info.state === 'error') {
+        return { recovered: true, text: info.text || '', failed: true, errText: info.error };
+      }
+      statusText.textContent = '回應中…';
+      await sleep(1000);
+    }
+    return { recovered: false };
+  } finally {
+    recovering = false;
+  }
+}
+
+// On page load / return to the app: if the last message is an unanswered user
+// message, the reply may have finished (or still be running) on the server.
+async function maybeResume() {
+  if (inflight || recovering) return;
+  const last = transcript[transcript.length - 1];
+  if (!last || last.role !== 'user') return;
+  let info;
+  try {
+    const r = await fetch(`/api/turn?sessionId=${encodeURIComponent(sessionId)}`, {
+      headers: authHeaders(),
+    });
+    if (!r.ok) return;
+    info = await r.json();
+  } catch {
+    return;
+  }
+  if (info.state === 'idle') return;
+
+  stageUser.hidden = false;
+  stageUser.textContent = last.content;
+  setSending(true);
+  setStatus('busy');
+  const rec = await recoverTurn();
+  if (rec.recovered) {
+    if (rec.errText) showError(rec.text || '', rec.errText);
+    if (rec.text?.trim()) {
+      transcript.push({ role: 'assistant', content: rec.text });
+      saveTranscript();
+    }
+    setStatus(rec.failed ? 'error' : 'ok');
+  } else {
+    setStatus('ok');
+  }
+  setSending(false);
+  statusText.textContent = subtitleDefault || '';
+}
+
 // ---- composer events ----
 form.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -268,7 +366,16 @@ form.addEventListener('submit', (e) => {
   send(text);
 });
 
-stopBtn.addEventListener('click', () => inflight?.abort());
+stopBtn.addEventListener('click', () => {
+  // Generation now survives a dropped connection, so stopping must be
+  // explicit on the server too.
+  fetch('/api/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ sessionId }),
+  }).catch(() => {});
+  inflight?.abort();
+});
 
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -365,6 +472,12 @@ $('#open-history').addEventListener('click', () => {
   list.scrollTop = list.scrollHeight;
 });
 
+// Returning to the app: if a reply was in flight when the page got frozen,
+// pick it back up.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') maybeResume();
+});
+
 // Surface any unexpected JS error instead of dying silently.
 window.addEventListener('error', (e) => {
   setStatus('error');
@@ -372,4 +485,5 @@ window.addEventListener('error', (e) => {
 });
 
 init();
+maybeResume();
 input.focus();
