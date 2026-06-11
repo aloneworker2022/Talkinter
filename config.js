@@ -25,8 +25,15 @@ export const config = {
   // 'oneshot'    -> spawn a fresh process per message (clean completion on exit)
   // 'persistent' -> keep one process per session, detect reply end by idle gap
   commandMode: env.AGENT_CMD_MODE || 'oneshot',
-  // For persistent mode: ms of stdout silence that marks the reply as complete.
-  commandIdleMs: parseInt(env.AGENT_CMD_IDLE_MS || '700', 10),
+  // For persistent mode: ms of stdout silence (after real content has started)
+  // that marks the reply as complete. Raise it if your agent pauses mid-answer.
+  commandIdleMs: parseInt(env.AGENT_CMD_IDLE_MS || '900', 10),
+  // For persistent mode: how long to wait for the FIRST content of a reply
+  // before giving up (covers an agent that "thinks" for a while).
+  commandWarmupMs: parseInt(env.AGENT_CMD_WARMUP_MS || '20000', 10),
+  // Run the command under a real pseudo-terminal via util-linux `script`.
+  // Needed only for CLIs that refuse to run without a TTY. Implies stdin input.
+  commandPty: /^(1|true|yes)$/i.test(env.AGENT_CMD_PTY || ''),
   // Working directory for the spawned command.
   commandCwd: env.AGENT_CMD_CWD || process.cwd(),
 

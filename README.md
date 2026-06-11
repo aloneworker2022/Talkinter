@@ -30,28 +30,45 @@ it at your real agent.
 
 Talkinter doesn't assume how Hermes is invoked — pick the adapter that matches.
 
-### Option A — wrap the CLI (replaces the SSH terminal)
+### Your setup: you just type `hermes` and it enters chat mode
 
-If you normally talk to Hermes by running a command in a terminal:
+That's an interactive REPL, so use the **command** adapter in **persistent**
+mode (one Hermes process stays alive per browser session and each message is
+fed to its stdin — exactly what you do over SSH, minus the SSH):
 
 ```bash
-AGENT_ADAPTER=command \
-AGENT_CMD="hermes chat --prompt {message}" \
-node server.js
+AGENT_ADAPTER=command AGENT_CMD="hermes" AGENT_CMD_MODE=persistent node server.js
 ```
 
-- `{message}` is replaced with the user's text. If you leave it out, the message
-  is piped to the command's **stdin** instead:
+Talkinter automatically cleans up what an interactive CLI prints so the web UI
+stays readable:
+
+- **ANSI colour codes** are stripped.
+- The **prompt** it reprints (`>`, `hermes>`, `❯`, ...) is removed.
+- The **echo** of your own input line is removed.
+
+Because a REPL never says "I'm done", a reply is treated as complete after
+`AGENT_CMD_IDLE_MS` (default 900ms) of silence — but only *after* the first real
+output, so an agent that thinks for a few seconds is never cut off early (it
+waits up to `AGENT_CMD_WARMUP_MS`, default 20s, for the first token). If Hermes
+pauses mid-answer and gets cut off, raise `AGENT_CMD_IDLE_MS`.
+
+If `hermes` refuses to run because it isn't attached to a terminal, add
+`AGENT_CMD_PTY=1` to run it under a real pseudo-terminal (via `script`):
+
+```bash
+AGENT_ADAPTER=command AGENT_CMD="hermes" AGENT_CMD_MODE=persistent AGENT_CMD_PTY=1 node server.js
+```
+
+### Other CLI shapes
+
+- One-shot command (Hermes keeps its own history): use `{message}` as the
+  placeholder, default `oneshot` mode spawns a fresh process per message and
+  streams until it exits.
   ```bash
-  AGENT_ADAPTER=command AGENT_CMD="hermes" node server.js
+  AGENT_ADAPTER=command AGENT_CMD="hermes chat --prompt {message}" node server.js
   ```
-- `AGENT_CMD_MODE=oneshot` (default) spawns a fresh process per message and
-  streams its stdout until it exits — clean and simple, best when Hermes keeps
-  its own conversation state.
-- `AGENT_CMD_MODE=persistent` keeps one Hermes process alive per browser session
-  and feeds each message to its stdin. Since an interactive REPL has no explicit
-  "I'm done" marker, the reply is considered complete after
-  `AGENT_CMD_IDLE_MS` (default 700ms) of stdout silence — tune it to your agent.
+- Omit `{message}` and the text is piped to the command's **stdin** instead.
 
 ### Option B — OpenAI-compatible HTTP API
 
@@ -78,7 +95,9 @@ All settings are environment variables (see `.env.example`):
 | `AGENT_ADAPTER` | `mock` | `mock` \| `command` \| `http` |
 | `AGENT_CMD` | — | CLI to run; `{message}` placeholder or stdin |
 | `AGENT_CMD_MODE` | `oneshot` | `oneshot` \| `persistent` |
-| `AGENT_CMD_IDLE_MS` | `700` | persistent mode reply-end silence window |
+| `AGENT_CMD_IDLE_MS` | `900` | persistent: silence (after first output) = reply done |
+| `AGENT_CMD_WARMUP_MS` | `20000` | persistent: max wait for the first output |
+| `AGENT_CMD_PTY` | _(off)_ | `1` to run under a real PTY for TTY-only CLIs |
 | `AGENT_CMD_CWD` | cwd | working dir for the command |
 | `AGENT_HTTP_URL` | — | OpenAI-compatible endpoint |
 | `AGENT_HTTP_KEY` | — | bearer token for the endpoint |
