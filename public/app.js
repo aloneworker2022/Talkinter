@@ -1,8 +1,8 @@
 import { renderMarkdown } from '/markdown.js';
 
 const $ = (sel) => document.querySelector(sel);
-const messagesEl = $('#messages');
-const emptyState = $('#empty-state');
+const stageUser = $('#stage-user');
+const stageReply = $('#stage-reply');
 const input = $('#input');
 const form = $('#composer');
 const sendBtn = $('#send');
@@ -11,8 +11,7 @@ const statusDot = $('#status-dot');
 const statusText = $('#subtitle');
 
 // crypto.randomUUID / navigator.clipboard only exist in secure contexts
-// (https or localhost). This app is often served over plain http://LAN-IP,
-// so both need fallbacks.
+// (https or localhost); this app is often served over plain http://LAN-IP.
 function uuid() {
   if (window.crypto?.randomUUID) return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -36,11 +35,48 @@ function copyText(text) {
 let sessionId = localStorage.getItem('talkinter.session') || uuid();
 localStorage.setItem('talkinter.session', sessionId);
 let authToken = localStorage.getItem('talkinter.token') || '';
-let inflight = null; // AbortController for the active request
+let inflight = null;
 let subtitleDefault = '';
 
-// ---- bootstrap branding / auth / connectivity ----
+// ---- this conversation's transcript (survives page refresh) ----
+const TRANSCRIPT_KEY = 'talkinter.transcript';
+let transcript = [];
+try { transcript = JSON.parse(localStorage.getItem(TRANSCRIPT_KEY) || '[]'); } catch { transcript = []; }
+
+function saveTranscript() {
+  if (transcript.length > 200) transcript = transcript.slice(-200);
+  localStorage.setItem(TRANSCRIPT_KEY, JSON.stringify(transcript));
+}
+
+// ---- settings (font size / font family / theme) ----
+const SETTINGS_KEY = 'talkinter.settings';
+const defaults = { fontSize: 15.5, font: 'sans', theme: 'dark' };
+let settings = { ...defaults };
+try { settings = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { /* keep defaults */ }
+
+function applySettings() {
+  document.documentElement.style.setProperty('--base-size', settings.fontSize + 'px');
+  document.documentElement.dataset.font = settings.font;
+  document.documentElement.dataset.theme = settings.theme;
+  document.querySelectorAll('.swatch').forEach((s) => {
+    s.classList.toggle('active', s.dataset.theme === settings.theme);
+  });
+  const slider = $('#set-fontsize');
+  const val = $('#set-fontsize-val');
+  if (slider) slider.value = settings.fontSize;
+  if (val) val.textContent = `${settings.fontSize}px`;
+  const fontSel = $('#set-font');
+  if (fontSel) fontSel.value = settings.font;
+}
+
+function saveSettings() {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+// ---- bootstrap ----
 async function init() {
+  applySettings();
+  showLastExchange();
   try {
     const cfg = await fetch('/api/config').then((r) => r.json());
     document.title = cfg.title || 'Talkinter';
@@ -56,7 +92,6 @@ async function init() {
 }
 
 function setStatus(state) {
-  // state: 'ok' (green) | 'busy' (amber pulse) | 'error' (red)
   statusDot.className = `dot ${state}`;
 }
 
@@ -68,25 +103,28 @@ function promptForToken() {
   }
 }
 
-// ---- message rendering ----
-function addMessage(role, text) {
-  emptyState?.remove();
-  const msg = document.createElement('div');
-  msg.className = `msg ${role}`;
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-  avatar.textContent = role === 'user' ? '🧑' : '🤖';
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  if (role === 'user') {
-    bubble.textContent = text;
-  } else {
-    bubble.innerHTML = text ? renderMarkdown(text) : thinkingIndicator();
+// ---- stage rendering (novel style: only the current exchange) ----
+function showEmpty() {
+  stageUser.hidden = true;
+  stageUser.textContent = '';
+  stageReply.innerHTML =
+    '<div class="empty"><div class="empty-emoji">💬</div><p>開始和你的 agent 聊天吧</p></div>';
+}
+
+function showLastExchange() {
+  // After a refresh, restore the most recent user/assistant pair.
+  const lastUser = [...transcript].reverse().find((m) => m.role === 'user');
+  const lastBot = [...transcript].reverse().find((m) => m.role === 'assistant');
+  if (!lastUser && !lastBot) {
+    showEmpty();
+    return;
   }
-  msg.append(avatar, bubble);
-  messagesEl.appendChild(msg);
-  scrollToBottom();
-  return bubble;
+  if (lastUser) {
+    stageUser.hidden = false;
+    stageUser.textContent = lastUser.content;
+  }
+  stageReply.innerHTML = lastBot ? renderMarkdown(lastBot.content) : '';
+  wireCopyButtons(stageReply);
 }
 
 function thinkingIndicator() {
@@ -96,18 +134,13 @@ function thinkingIndicator() {
   );
 }
 
-function showError(bubble, accText, errText) {
+function showError(accText, errText) {
   const base = accText.trim() ? renderMarkdown(accText) : '';
-  bubble.innerHTML =
-    base + `<div class="error-box">⚠️ ${escapeHtml(errText)}</div>`;
+  stageReply.innerHTML = base + `<div class="error-box">⚠️ ${escapeHtml(errText)}</div>`;
 }
 
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function scrollToBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 function wireCopyButtons(scope) {
@@ -126,8 +159,13 @@ function wireCopyButtons(scope) {
 
 // ---- sending ----
 async function send(text) {
-  addMessage('user', text);
-  const bubble = addMessage('bot', '');
+  stageUser.hidden = false;
+  stageUser.textContent = text;
+  stageReply.innerHTML = thinkingIndicator();
+  stageReply.classList.add('caret');
+
+  transcript.push({ role: 'user', content: text });
+  saveTranscript();
 
   setSending(true);
   setStatus('busy');
@@ -149,7 +187,7 @@ async function send(text) {
 
     if (res.status === 401) {
       failed = true;
-      showError(bubble, '', '密碼錯誤或未授權。請重新整理頁面並輸入正確的存取密碼。');
+      showError('', '密碼錯誤或未授權。請重新整理頁面並輸入正確的存取密碼。');
       localStorage.removeItem('talkinter.token');
       authToken = '';
       return;
@@ -179,33 +217,37 @@ async function send(text) {
             statusText.textContent = '回應中…';
           }
           acc += evt.text;
-          bubble.innerHTML = renderMarkdown(acc);
-          wireCopyButtons(bubble);
-          scrollToBottom();
+          stageReply.innerHTML = renderMarkdown(acc);
+          wireCopyButtons(stageReply);
+          stageReply.scrollTop = stageReply.scrollHeight;
         } else if (evt.type === 'error') {
           failed = true;
-          showError(bubble, acc, evt.error);
+          showError(acc, evt.error);
         }
       }
     }
   } catch (err) {
     if (err.name === 'AbortError') {
       acc += acc ? '\n\n_(已停止)_' : '_(已停止)_';
-      bubble.innerHTML = renderMarkdown(acc);
+      stageReply.innerHTML = renderMarkdown(acc);
     } else {
       failed = true;
-      showError(bubble, acc, `連線失敗：${err.message}`);
+      showError(acc, `連線失敗：${err.message}`);
     }
   } finally {
-    if (!failed && !acc.trim() && !bubble.querySelector('.error-box')) {
-      showError(bubble, '', 'Agent 沒有任何回應。請檢查伺服器 log（AGENT_CMD 路徑是否正確？）');
+    stageReply.classList.remove('caret');
+    if (!failed && !acc.trim() && !stageReply.querySelector('.error-box')) {
+      showError('', 'Agent 沒有任何回應。請檢查伺服器 log。');
       failed = true;
+    }
+    if (acc.trim()) {
+      transcript.push({ role: 'assistant', content: acc });
+      saveTranscript();
     }
     setSending(false);
     setStatus(failed ? 'error' : 'ok');
     statusText.textContent = subtitleDefault || '';
     inflight = null;
-    scrollToBottom();
     input.focus();
   }
 }
@@ -215,7 +257,7 @@ function setSending(on) {
   stopBtn.hidden = !on;
 }
 
-// ---- events ----
+// ---- composer events ----
 form.addEventListener('submit', (e) => {
   e.preventDefault();
   if (inflight) return;
@@ -241,6 +283,7 @@ function autoresize() {
   input.style.height = Math.min(input.scrollHeight, 180) + 'px';
 }
 
+// ---- new chat ----
 $('#new-chat').addEventListener('click', async () => {
   if (!window.confirm('開始新對話？目前的對話紀錄會被清除。')) return;
   if (inflight) inflight.abort();
@@ -256,13 +299,70 @@ $('#new-chat').addEventListener('click', async () => {
   } catch { /* ignore */ }
   sessionId = uuid();
   localStorage.setItem('talkinter.session', sessionId);
-  messagesEl.innerHTML = '';
-  const empty = document.createElement('div');
-  empty.className = 'empty';
-  empty.id = 'empty-state';
-  empty.innerHTML = '<div class="empty-emoji">💬</div><p>開始和你的 agent 聊天吧</p>';
-  messagesEl.appendChild(empty);
+  transcript = [];
+  saveTranscript();
+  showEmpty();
   input.focus();
+});
+
+// ---- modals ----
+function openModal(id) { $(`#${id}`).hidden = false; }
+function closeModal(id) { $(`#${id}`).hidden = true; }
+
+$('#open-settings').addEventListener('click', () => openModal('settings-modal'));
+
+document.querySelectorAll('.modal-close').forEach((btn) => {
+  btn.addEventListener('click', () => closeModal(btn.dataset.close));
+});
+document.querySelectorAll('.modal').forEach((m) => {
+  m.addEventListener('click', (e) => {
+    if (e.target === m) m.hidden = true; // click on the backdrop closes
+  });
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal').forEach((m) => (m.hidden = true));
+});
+
+// settings controls
+$('#set-fontsize').addEventListener('input', (e) => {
+  settings.fontSize = Number(e.target.value);
+  saveSettings();
+  applySettings();
+});
+$('#set-font').addEventListener('change', (e) => {
+  settings.font = e.target.value;
+  saveSettings();
+  applySettings();
+});
+document.querySelectorAll('.swatch').forEach((s) => {
+  s.addEventListener('click', () => {
+    settings.theme = s.dataset.theme;
+    saveSettings();
+    applySettings();
+  });
+});
+
+// history (this conversation only)
+$('#open-history').addEventListener('click', () => {
+  const list = $('#history-list');
+  if (!transcript.length) {
+    list.innerHTML = '<div class="history-empty">這次對話還沒有內容</div>';
+  } else {
+    list.innerHTML = transcript
+      .map((m) => {
+        const role = m.role === 'user' ? '你' : 'Agent';
+        const body =
+          m.role === 'user' ? escapeHtml(m.content) : `<div class="md">${renderMarkdown(m.content)}</div>`;
+        return `<div class="history-item ${m.role === 'user' ? 'user' : 'bot'}">` +
+          `<div class="history-role">${role}</div>` +
+          `<div class="history-body">${body}</div></div>`;
+      })
+      .join('');
+    wireCopyButtons(list);
+  }
+  closeModal('settings-modal');
+  openModal('history-modal');
+  list.scrollTop = list.scrollHeight;
 });
 
 // Surface any unexpected JS error instead of dying silently.

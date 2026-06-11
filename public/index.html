@@ -11,22 +11,27 @@
 <body>
   <div id="app" class="app">
     <header class="topbar">
-      <div class="brand">
+      <button id="open-settings" class="brand" title="點我開啟設定">
         <span id="status-dot" class="dot"></span>
-        <div class="brand-text">
+        <span class="brand-text">
           <strong id="title">Talkinter</strong>
           <small id="subtitle">連線中…</small>
-        </div>
-      </div>
+        </span>
+      </button>
       <div class="actions">
         <button id="new-chat" class="text-btn" title="清除紀錄，開始新對話">🗑 新對話</button>
       </div>
     </header>
 
-    <main id="messages" class="messages">
-      <div class="empty" id="empty-state">
-        <div class="empty-emoji">💬</div>
-        <p>開始和你的 agent 聊天吧</p>
+    <main class="stage-wrap">
+      <div id="stage" class="stage">
+        <div id="stage-user" class="stage-user" hidden></div>
+        <div id="stage-reply" class="stage-reply md">
+          <div class="empty">
+            <div class="empty-emoji">💬</div>
+            <p>開始和你的 agent 聊天吧</p>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -37,6 +42,61 @@
       </button>
       <button id="stop" type="button" class="stop-btn" title="Stop" hidden>停止</button>
     </form>
+
+    <!-- 設定畫面 -->
+    <div id="settings-modal" class="modal" hidden>
+      <div class="modal-panel">
+        <div class="modal-head">
+          <strong>設定</strong>
+          <button class="modal-close" data-close="settings-modal" aria-label="關閉">✕</button>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label">字型大小</span>
+          <div class="setting-control">
+            <input id="set-fontsize" type="range" min="13" max="24" step="1" />
+            <span id="set-fontsize-val" class="setting-value"></span>
+          </div>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label">字型</span>
+          <div class="setting-control">
+            <select id="set-font">
+              <option value="sans">黑體（預設）</option>
+              <option value="serif">明體</option>
+              <option value="round">圓潤</option>
+              <option value="mono">等寬</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label">版面顏色</span>
+          <div class="setting-control swatches">
+            <button class="swatch" data-theme="dark" title="深色"></button>
+            <button class="swatch" data-theme="midnight" title="午夜藍"></button>
+            <button class="swatch" data-theme="light" title="淺色"></button>
+            <button class="swatch" data-theme="sepia" title="羊皮紙"></button>
+          </div>
+        </div>
+
+        <div class="setting">
+          <button id="open-history" class="text-btn wide">📜 歷史對話內容</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 本次對話歷史 -->
+    <div id="history-modal" class="modal" hidden>
+      <div class="modal-panel large">
+        <div class="modal-head">
+          <strong>本次對話</strong>
+          <button class="modal-close" data-close="history-modal" aria-label="關閉">✕</button>
+        </div>
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/app.js"></script>
