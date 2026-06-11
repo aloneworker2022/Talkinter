@@ -40,12 +40,19 @@ it at your real agent.
 through pipes. Instead use Hermes's built-in API server, which is exactly what
 Talkinter's `http` adapter is for:
 
-1. In your Hermes config, set an API key for the server, e.g. `API_SERVER_KEY=my-secret`.
+1. **Enable the API server** — it is OFF by default. Add to `~/.hermes/.env`:
+   ```bash
+   API_SERVER_ENABLED=true
+   API_SERVER_KEY=my-secret
+   # optional: API_SERVER_PORT=8642  API_SERVER_HOST=127.0.0.1
+   ```
 2. Start the gateway (it serves an OpenAI-compatible API on `127.0.0.1:8642`):
    ```bash
    hermes gateway
    # verify:  curl http://localhost:8642/health
    ```
+   `ECONNREFUSED` from Talkinter means this step is missing — nothing is
+   listening on the port.
 3. Point Talkinter at it:
    ```bash
    AGENT_ADAPTER=http \
