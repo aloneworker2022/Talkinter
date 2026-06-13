@@ -36,7 +36,7 @@
     </main>
 
     <form id="composer" class="composer" autocomplete="off">
-      <textarea id="input" rows="1" placeholder="輸入訊息…  (Enter 送出，Shift+Enter 換行)"></textarea>
+      <textarea id="input" rows="1" placeholder="輸入訊息…"></textarea>
       <button id="send" type="submit" class="send-btn" title="Send" aria-label="Send">
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 11.5 21 3l-8.5 18-2.2-7.3z"/></svg>
       </button>
@@ -79,6 +79,14 @@
             <button class="swatch" data-theme="light" title="淺色"></button>
             <button class="swatch" data-theme="sepia" title="羊皮紙"></button>
           </div>
+        </div>
+
+        <div class="setting">
+          <label class="setting-row">
+            <span class="setting-label inline">按 Enter 直接送出</span>
+            <input id="set-enter" type="checkbox" class="switch" />
+          </label>
+          <small class="setting-hint">關閉時：Enter 換行，Ctrl/⌘+Enter 送出</small>
         </div>
 
         <div class="setting">

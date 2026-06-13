@@ -50,7 +50,7 @@ function saveTranscript() {
 
 // ---- settings (font size / font family / theme) ----
 const SETTINGS_KEY = 'talkinter.settings';
-const defaults = { fontSize: 15.5, font: 'sans', theme: 'dark' };
+const defaults = { fontSize: 15.5, font: 'sans', theme: 'dark', enterSends: false };
 let settings = { ...defaults };
 try { settings = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { /* keep defaults */ }
 
@@ -67,6 +67,11 @@ function applySettings() {
   if (val) val.textContent = `${settings.fontSize}px`;
   const fontSel = $('#set-font');
   if (fontSel) fontSel.value = settings.font;
+  const enterToggle = $('#set-enter');
+  if (enterToggle) enterToggle.checked = settings.enterSends;
+  input.placeholder = settings.enterSends
+    ? '輸入訊息…  (Enter 送出，Shift+Enter 換行)'
+    : '輸入訊息…  (Enter 換行，Ctrl+Enter 送出)';
 }
 
 function saveSettings() {
@@ -378,7 +383,13 @@ stopBtn.addEventListener('click', () => {
 });
 
 input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if (e.key !== 'Enter' || e.isComposing) return;
+  // Ctrl/Cmd+Enter always sends. Plain Enter sends only when the user has
+  // opted into it; otherwise it inserts a newline as normal.
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  } else if (settings.enterSends && !e.shiftKey) {
     e.preventDefault();
     form.requestSubmit();
   }
@@ -438,6 +449,11 @@ $('#set-fontsize').addEventListener('input', (e) => {
 });
 $('#set-font').addEventListener('change', (e) => {
   settings.font = e.target.value;
+  saveSettings();
+  applySettings();
+});
+$('#set-enter').addEventListener('change', (e) => {
+  settings.enterSends = e.target.checked;
   saveSettings();
   applySettings();
 });
